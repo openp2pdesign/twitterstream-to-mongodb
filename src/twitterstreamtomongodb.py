@@ -156,13 +156,16 @@ class MongoDBCoordinator:
 
             try:
                 dbauth = json.loads(open(authfile, 'r').read())
-                if not self.db.authenticate(dbauth["user"],
-                                            dbauth["password"]):
+                if not self.db.authenticate(
+                        dbauth["user"],
+                        dbauth["password"]):
                     raise Exception("Invalid database credentials")
 
-            except:
+            except Exception, err:
                 print "Error authenticating database"
+                print Exception, err
                 raise
+
 
         self.tuits = {}
 
