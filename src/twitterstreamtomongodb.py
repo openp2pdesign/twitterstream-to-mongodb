@@ -1,5 +1,8 @@
+# -*- encoding: utf-8 -*-
+
 """
 Twitter Stream To MongoDB (c) by gdelfresno
+User Stream feature by Massimo Menichinelli @openp2pdesign
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -37,15 +40,25 @@ active_terms = {}
 
 def get_parser():
     the_parser = OptionParser()
-    the_parser.add_option("-d", "--database", dest="database", help="mongodb database name")
+    the_parser.add_option(
+        "-d", "--database", dest="database", help="mongodb database name")
     the_parser.add_option("-s", "--server", dest="server", help="mongodb host")
-    the_parser.add_option("-p", "--port", dest="port", help="mongodb port", type="int")
+    the_parser.add_option(
+        "-p", "--port", dest="port", help="mongodb port", type="int")
     the_parser.add_option("-a", "--dbauth", dest="dbauth", help="db auth file")
-    the_parser.add_option("-o", "--oauth", dest="oauthfile", help="file with oauth options")
-    the_parser.add_option("-t", "--track", dest="track", help="track terms file")
-    the_parser.add_option("-f", "--follow", dest="follow", help="follow users file")
-    the_parser.add_option("-e", "--exclude-retweets", action="store_true", dest="exclude_retweets",
-                          help="Exclude retweets from stream", default=False)
+    the_parser.add_option(
+        "-o", "--oauth", dest="oauthfile", help="file with oauth options")
+    the_parser.add_option(
+        "-t", "--track", dest="track", help="track terms file")
+    the_parser.add_option(
+        "-f", "--follow", dest="follow", help="follow users file")
+    the_parser.add_option("-e", "--retweets", action="store_true",
+                          dest="exclude_retweets",
+                          help="Exclude retweets from stream",
+                          default=False)
+    the_parser.add_option(
+        "-u", "--user", dest="user", action="store_true",
+        help="follow a single user", default=False)
     the_parser.usage = "bad parametres"
     return the_parser
 
@@ -61,7 +74,8 @@ def update_search_query(the_options, stream_thread):
     if the_options.follow and not the_options.track:
         follow = True
 
-    stream_thread = StreamConsumerThreadClass(query, the_options.oauthfile, follow)
+    stream_thread = StreamConsumerThreadClass(
+        query, the_options.oauthfile, follow)
     stream_thread.setDaemon(True)
 
     stream_thread.start()
@@ -111,7 +125,8 @@ def pretty_print_status(status):
     description = status['user']['screen_name']
     if "retweeted_status" in status:
         description = "%s RT by %s" % (
-            status["retweeted_status"]["user"]["screen_name"], status['user']['screen_name'])
+            status["retweeted_status"]["user"]["screen_name"],
+            status['user']['screen_name'])
         text = status["retweeted_status"]["text"]
 
     try:
@@ -123,7 +138,9 @@ def pretty_print_status(status):
 
 
 class MongoDBCoordinator:
-    def __init__(self, host='localhost', port=None, database='TwitterStream', authfile=None):
+
+    def __init__(self, host='localhost', port=None,
+                 database='TwitterStream', authfile=None):
         try:
             if port is not None:
                 self.mongo = MongoClient(host, int(port))
@@ -139,7 +156,8 @@ class MongoDBCoordinator:
 
             try:
                 dbauth = json.loads(open(authfile, 'r').read())
-                if not self.db.authenticate(dbauth["user"], dbauth["password"]):
+                if not self.db.authenticate(dbauth["user"],
+                                            dbauth["password"]):
                     raise Exception("Invalid database credentials")
 
             except:
@@ -171,10 +189,24 @@ class MongoDBCoordinator:
                 except Exception, e:
                     print "Error %s" % e.message
 
+    def add_normal_tuit(self, tweet):
+        if tweet["user"]["name"] not in self.db.collection_names():
+            self.db.create_collection(tweet["user"]["name"])
+
+        collection = self.db[tweet["user"]["name"]]
+        collection.save(tweet)
+
+        try:
+            print "[%-15s]%s" % (tweet["user"]["name"],
+                                 pretty_print_status(tweet))
+        except Exception, e:
+            print "Error %s" % e.message
+
 
 class MongoDBListener(StreamListener):
+
     """
-    A listener handles tweets are the received from the stream. 
+    A listener handles tweets are the received from the stream.
     This is a basic listener that just prints received tweets to stdout.
     """
 
@@ -185,6 +217,11 @@ class MongoDBListener(StreamListener):
         Override this method if you wish to manually handle
         the stream data. Return False to stop stream and close connection.
         """
+
+        if 'created_at' in data:
+            jstatus = json.loads(data)
+            mongo.add_normal_tuit(jstatus)
+
         if 'retweeted_status' in data:
             if program_options.exclude_retweets:
                 pass
@@ -217,20 +254,26 @@ class MongoDBListener(StreamListener):
 
 # Class that track the stream
 class StreamConsumerThreadClass(threading.Thread):
-    def __init__(self, term='', oauthfile='', follow=False):
+
+    def __init__(self, term='', oauthfile='', follow=False,
+                 user=False, track=False):
         threading.Thread.__init__(self)
         self.searchterm = term
         self.name = term
         self.consume = True
         self.follow = follow
+        self.user = user
+        self.track = track
         listener = MongoDBListener()
 
         try:
             oauth = json.loads(open(oauthfile, 'r').read())
 
             if 'consumer_key' in oauth:
-                auth = OAuthHandler(oauth['consumer_key'], oauth['consumer_secret'])
-                auth.set_access_token(oauth['access_token'], oauth['access_token_secret'])
+                auth = OAuthHandler(
+                    oauth['consumer_key'], oauth['consumer_secret'])
+                auth.set_access_token(
+                    oauth['access_token'], oauth['access_token_secret'])
                 self.api = API(auth)
 
                 if not self.api.verify_credentials():
@@ -247,20 +290,32 @@ class StreamConsumerThreadClass(threading.Thread):
 
     def run(self):
         now = datetime.datetime.now()
-        print "Twitter Stream with terms: %s started at: %s" % (self.getName(), now)
+        if self.user:
+            print "Twitter Stream of the OAuth user: started at: %s" \
+                % (now)
+        else:
+            print "Twitter Stream with terms: %s started at: %s" \
+                % (self.getName(), now)
 
         connected = False
         while True:
             try:
                 if not connected:
                     connected = True
-                    if self.follow:
+                    if self.user:
+                        self.stream.userstream(_with='followings')
+                    elif self.follow:
                         user_ids = []
-                        for user in self.api.lookup_users([], self.searchterm.split(','), False):
+                        for user in self.api.lookup_users(
+                                [],
+                                self.searchterm.split(','),
+                                False):
                             user_ids.append(user.id)
-
-                        self.stream.filter(follow=[",".join("{0}".format(n) for n in user_ids)])
-                    else:
+                        self.stream.filter(
+                            follow=[
+                                ",".join("{0}".format(n) for n in user_ids)
+                            ])
+                    elif self.track:
                         self.stream.filter(track=[self.searchterm])
 
             except SSLError, sse:
@@ -274,33 +329,57 @@ class StreamConsumerThreadClass(threading.Thread):
 if __name__ == "__main__":
     parser = get_parser()
     (program_options, args) = parser.parse_args()
-    print program_options, args
+    print "Program options:", program_options, args
 
     if program_options.follow and program_options.track:
-        print "--track and --follow options are incompatible yet, --track will be used"
+        print "--track and --follow options are incompatible yet, ' +\
+        ' --track will be used"
 
-    if program_options.follow is None and program_options.track is None:
-        print "You must pass one of this options --track and --follow"
+    if program_options.follow is None and  \
+            program_options.track is None and  \
+            program_options.user is None:
+        print "You must pass one of this options: --track, --follow or --user"
         print "Exiting"
         exit(0)
 
     terms_file = program_options.follow
     if program_options.track:
         terms_file = program_options.track
+    if program_options.user:
+        terms_file = ''
+    if program_options.user is None:
+        program_options.user = False
 
     try:
-        mongo = MongoDBCoordinator(program_options.server, program_options.port, program_options.database,
+        mongo = MongoDBCoordinator(program_options.server,
+                                   program_options.port,
+                                   program_options.database,
                                    program_options.dbauth)
-        stream = StreamConsumerThreadClass('', program_options.oauthfile)
-        try:
-            while True:
-                update_terms(program_options, stream, terms_file)
-                time.sleep(5)
+        stream = StreamConsumerThreadClass(
+            term='',
+            oauthfile=program_options.oauthfile,
+            user=program_options.user,
+            follow=program_options.follow,
+            track=program_options.track)
 
-        except KeyboardInterrupt, ke:
-            print "Closing stream"
-            stream.stop_consume()
+        if program_options.user:
+            stream.setDaemon(True)
+            stream.start()
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt, ke:
+                print "Closing stream"
+                stream.stop_consume()
+                exit(0)
+        else:
+            try:
+                while True:
+                    update_terms(program_options, stream, terms_file)
+                    time.sleep(5)
+            except KeyboardInterrupt, ke:
+                print "Closing stream"
+                stream.stop_consume()
     except Exception, t:
         print t
         exit(0)
-
